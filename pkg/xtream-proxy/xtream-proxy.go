@@ -25,8 +25,8 @@ import (
 	"net/url"
 	"strconv"
 
+	xtream "github.com/mattetti/go.xtream-codes"
 	"github.com/pierre-emmanuelJ/iptv-proxy/pkg/config"
-	xtream "github.com/tellytv/go.xtream-codes"
 )
 
 const (

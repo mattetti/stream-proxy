@@ -21,15 +21,17 @@ package server
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"io"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jamesnetherton/m3u"
@@ -231,7 +233,7 @@ func (c *Config) xtreamPlayerAPIGET(ctx *gin.Context) {
 }
 
 func (c *Config) xtreamPlayerAPIPOST(ctx *gin.Context) {
-	contents, err := ioutil.ReadAll(ctx.Request.Body)
+	contents, err := io.ReadAll(io.Reader(ctx.Request.Body))
 	if err != nil {
 		ctx.AbortWithError(http.StatusInternalServerError, err) // nolint: errcheck
 		return
@@ -439,70 +441,43 @@ func getHlsRedirectURL(channel string) (*url.URL, error) {
 }
 
 func (c *Config) hlsXtreamStream(ctx *gin.Context, oriURL *url.URL) {
-	client := &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	proxy := httputil.NewSingleHostReverseProxy(oriURL)
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		if resp.StatusCode == http.StatusFound {
+			location, err := resp.Location()
+			if err != nil {
+				return err
+			}
 
-	req, err := http.NewRequest("GET", oriURL.String(), nil)
-	if err != nil {
-		ctx.AbortWithError(http.StatusInternalServerError, err) // nolint: errcheck
-		return
-	}
+			id := ctx.Param("id")
+			if len(id) > 0 {
+				hlsChannelsRedirectURLLock.Lock()
+				hlsChannelsRedirectURL[id] = *location
+				hlsChannelsRedirectURLLock.Unlock()
+			}
 
-	mergeHttpHeader(req.Header, ctx.Request.Header)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		ctx.AbortWithError(http.StatusInternalServerError, err) // nolint: errcheck
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusFound {
-		location, err := resp.Location()
-		if err != nil {
-			ctx.AbortWithError(http.StatusInternalServerError, err) // nolint: errcheck
-			return
+			// Update the proxy with the new URL
+			newURL, err := url.Parse(location.String())
+			if err != nil {
+				return err
+			}
+			proxy.Director = func(req *http.Request) {
+				req.URL = newURL
+				req.Host = newURL.Host
+				mergeHttpHeader(req.Header, ctx.Request.Header)
+			}
 		}
-		id := ctx.Param("id")
-		if strings.Contains(location.String(), id) {
-			hlsChannelsRedirectURLLock.Lock()
-			hlsChannelsRedirectURL[id] = *location
-			hlsChannelsRedirectURLLock.Unlock()
 
-			hlsReq, err := http.NewRequest("GET", location.String(), nil)
-			if err != nil {
-				ctx.AbortWithError(http.StatusInternalServerError, err) // nolint: errcheck
-				return
-			}
+		log.Printf("hlsXtreamStream proxied from %s completed with status code: %d", oriURL.String(), resp.StatusCode)
 
-			mergeHttpHeader(hlsReq.Header, ctx.Request.Header)
-
-			hlsResp, err := client.Do(hlsReq)
-			if err != nil {
-				ctx.AbortWithError(http.StatusInternalServerError, err) // nolint: errcheck
-				return
-			}
-			defer hlsResp.Body.Close()
-
-			b, err := ioutil.ReadAll(hlsResp.Body)
-			if err != nil {
-				ctx.AbortWithError(http.StatusInternalServerError, err) // nolint: errcheck
-				return
-			}
-			body := string(b)
-			body = strings.ReplaceAll(body, "/"+c.XtreamUser.String()+"/"+c.XtreamPassword.String()+"/", "/"+c.User.String()+"/"+c.Password.String()+"/")
-
-			mergeHttpHeader(ctx.Writer.Header(), hlsResp.Header)
-
-			ctx.Data(http.StatusOK, hlsResp.Header.Get("Content-Type"), []byte(body))
-			return
-		}
-		ctx.AbortWithError(http.StatusInternalServerError, errors.New("Unable to HLS stream")) // nolint: errcheck
-		return
+		return nil
 	}
 
-	ctx.Status(resp.StatusCode)
+	proxy.Director = func(req *http.Request) {
+		req.URL = oriURL
+		req.Host = oriURL.Host
+		mergeHttpHeader(req.Header, ctx.Request.Header)
+	}
+
+	proxy.ServeHTTP(ctx.Writer, ctx.Request)
 }

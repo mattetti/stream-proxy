@@ -64,9 +64,9 @@ func NewServer(config *config.ProxyConfig) (*Config, error) {
 		}
 	}
 
-        if trimmedCustomId := strings.Trim(config.CustomId, "/"); trimmedCustomId != "" {
-                endpointAntiColision = trimmedCustomId
-        }
+	if trimmedCustomId := strings.Trim(config.CustomId, "/"); trimmedCustomId != "" {
+		endpointAntiColision = trimmedCustomId
+	}
 
 	return &Config{
 		config,
@@ -85,6 +85,10 @@ func (c *Config) Serve() error {
 
 	router := gin.Default()
 	router.Use(cors.Default())
+	// Comment out to log the response sent back to the client
+	// if gin.Mode() == gin.DebugMode {
+	// 	router.Use(responseBodyLoggerMiddleware())
+	// }
 	group := router.Group("/")
 	c.routes(group)
 
