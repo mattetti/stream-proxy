@@ -4,14 +4,9 @@
 
 ## Description
 
-Iptv-Proxy is a project to proxyfie an m3u file
-and to proxyfie an Xtream iptv service (client API).
+Iptv-Proxy is a project to proxyfie an Xtream iptv service (client API).
 
-### M3U and M3U8
-
-M3U service convert an iptv m3u file into a web proxy server.
-
-It's transform all the original tracks to an new url pointing on the proxy.
+(This fork focuses on making the xtream-code proxying working but YMMV, no support provided, I forked/patched to help someone)
 
 
 ### Xtream code client api
@@ -20,67 +15,6 @@ proxy on Xtream code (client API)
 
 support live, vod, series and full epg :rocket:
 
-### M3u Example
-
-Original iptv m3u file
-
-```m3u
-#EXTM3U
-#EXTINF:-1 tvg-ID="examplechanel1.com" tvg-name="chanel1" tvg-logo="http://ch.xyz/logo1.png" group-title="USA HD",CHANEL1-HD
-http://iptvexample.net:1234/12/test/1
-#EXTINF:-1 tvg-ID="examplechanel2.com" tvg-name="chanel2" tvg-logo="http://ch.xyz/logo2.png" group-title="USA HD",CHANEL2-HD
-http://iptvexample.net:1234/13/test/2
-#EXTINF:-1 tvg-ID="examplechanel3.com" tvg-name="chanel3" tvg-logo="http://ch.xyz/logo3.png" group-title="USA HD",CHANEL3-HD
-http://iptvexample.net:1234/14/test/3
-#EXTINF:-1 tvg-ID="examplechanel4.com" tvg-name="chanel4" tvg-logo="http://ch.xyz/logo4.png" group-title="USA HD",CHANEL4-HD
-http://iptvexample.net:1234/15/test/4
-```
-
-What M3U proxy IPTV do
- - convert chanels url to new endpoints
- - convert original m3u file with new routes pointing to the proxy
-
-Start proxy server example
-
-```Bash
-iptv-proxy --m3u-url http://example.com/get.php?username=user&password=pass&type=m3u_plus&output=m3u8 \
-             --port 8080 \
-             --hostname proxyexample.com \
-             --user test \
-             --password passwordtest
-```
-
-
- That's give you an m3u file on a specific endpoint `iptv.m3u` in our example
- 
- `http://proxyserver.com:8080/iptv.m3u?username=test&password=passwordtest`
-
-All the new routes pointing on your proxy server
-```m3u
-#EXTM3U
-#EXTINF:-1 tvg-ID="examplechanel1.com" tvg-name="chanel1" tvg-logo="http://ch.xyz/logo1.png" group-title="USA HD",CHANEL1-HD
-http://proxyserver.com:8080/12/test/1?username=test&password=passwordtest
-#EXTINF:-1 tvg-ID="examplechanel2.com" tvg-name="chanel2" tvg-logo="http://ch.xyz/logo2.png" group-title="USA HD",CHANEL2-HD
-http://proxyserver.com:8080/13/test/2?username=test&password=passwordtest
-#EXTINF:-1 tvg-ID="examplechanel3.com" tvg-name="chanel3" tvg-logo="http://ch.xyz/logo3.png" group-title="USA HD",CHANEL3-HD
-http://proxyserver.com:8080/14/test/3?username=test&password=passwordtest
-#EXTINF:-1 tvg-ID="examplechanel4.com" tvg-name="chanel4" tvg-logo="http://ch.xyz/logo4.png" group-title="USA HD",CHANEL4-HD
-http://proxyserver.com:8080/15/test/4?username=test&password=passwordtest
-```
-
-### M3u8 Example
-
-The m3u8 feature is like m3u.
-The playlist should be in the m3u format and should contain all m3u8 tracks.
-
-Sample of the original m3u file containing m3u8 track:
-```Shell
-#EXTM3U
-#EXTINF:-1 tvg-ID="examplechanel1.com" tvg-name="chanel1" tvg-logo="http://ch.xyz/logo1.png" group-title="USA HD",CHANEL1-HD
-http://iptvexample.net:1234/12/test/1.m3u8
-#EXTINF:-1 tvg-ID="examplechanel2.com" tvg-name="chanel2" tvg-logo="http://ch.xyz/logo2.png" group-title="USA HD",CHANEL2-HD
-http://iptvexample.net:1234/13/test/2.m3u8
-```
 
 ### Xtream code client API example
 
@@ -88,7 +22,7 @@ http://iptvexample.net:1234/13/test/2.m3u8
 % iptv-proxy --m3u-url http://example.com:1234/get.php?username=user&password=pass&type=m3u_plus&output=m3u8 \
              --port 8080 \
              --hostname proxyexample.com \
-             ## put xtream flags if you want to add xtream proxy
+             ## put xtream flags to activate the xtream proxy
              --xtream-user xtream_user \
              --xtream-password xtream_password \
              --xtream-base-url http://example.com:1234 \
@@ -99,8 +33,9 @@ http://iptvexample.net:1234/13/test/2.m3u8
 
 What Xtream proxy do
 
- - convert xtream `xtream-user ` and `xtream-password` into new `user` and `password`
- - convert `xtream-base-url` with `hostname` and `port`
+ - swap the proxy `user` and `password` for the xtream `xtream-user ` and `xtream-password` and proxies the requests.
+ - swap the proxy `hostname` and `port` for `xtream-base-url`
+ - reverse proxy streams (without buffering server side)
  
 Original xtream credentials
  
