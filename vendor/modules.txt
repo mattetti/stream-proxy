@@ -101,7 +101,7 @@ github.com/leodido/go-urn
 # github.com/magiconair/properties v1.8.7
 ## explicit; go 1.19
 github.com/magiconair/properties
-# github.com/mattetti/go.xtream-codes v0.0.0-20231111232614-0c477bbd5f97
+# github.com/mattetti/go.xtream-codes v0.0.0-20231112013353-62bd7f4d5ee8
 ## explicit; go 1.17
 github.com/mattetti/go.xtream-codes
 # github.com/mattn/go-isatty v0.0.20

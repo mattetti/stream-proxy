@@ -473,6 +473,12 @@ func (c *Config) hlsXtreamStream(ctx *gin.Context, oriURL *url.URL) {
 		return nil
 	}
 
+	proxy.ErrorHandler = func(writer http.ResponseWriter, request *http.Request, e error) {
+		// Log the error
+		log.Printf("Error proxying request to %s: %v", oriURL.String(), e)
+		ctx.AbortWithError(http.StatusInternalServerError, e)
+	}
+
 	proxy.Director = func(req *http.Request) {
 		req.URL = oriURL
 		req.Host = oriURL.Host

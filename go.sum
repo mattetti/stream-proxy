@@ -263,6 +263,8 @@ github.com/magiconair/properties v1.8.7 h1:IeQXZAiQcpL9mgcAe1Nu6cX9LLw6ExEHKjN0V
 github.com/magiconair/properties v1.8.7/go.mod h1:Dhd985XPs7jluiymwWYZ0G4Z61jb3vdS329zhj2hYo0=
 github.com/mattetti/go.xtream-codes v0.0.0-20231111232614-0c477bbd5f97 h1:wJFOGCVp5HZieKp/LMjx8iCmusnrQtM+5X+KOBqsTzg=
 github.com/mattetti/go.xtream-codes v0.0.0-20231111232614-0c477bbd5f97/go.mod h1:N7uVKttx1edutlzp1igzL3bwGB2Gx2cV2KiGMhcCdNk=
+github.com/mattetti/go.xtream-codes v0.0.0-20231112013353-62bd7f4d5ee8 h1:s/NaXWVUBGB39M5MVZ7VdiLla3wE+D97B3JBRBUpH10=
+github.com/mattetti/go.xtream-codes v0.0.0-20231112013353-62bd7f4d5ee8/go.mod h1:N7uVKttx1edutlzp1igzL3bwGB2Gx2cV2KiGMhcCdNk=
 github.com/mattn/go-colorable v0.0.9/go.mod h1:9vuHe8Xs5qXnSaW/c/ABM9alt+Vo+STaOChaDxuIBZU=
 github.com/mattn/go-isatty v0.0.3/go.mod h1:M+lRXTBqGeGNdLjl/ufCoiOlB5xdOkqRJdNxMWT7Zi4=
 github.com/mattn/go-isatty v0.0.4/go.mod h1:M+lRXTBqGeGNdLjl/ufCoiOlB5xdOkqRJdNxMWT7Zi4=

@@ -11,7 +11,7 @@ require (
 	github.com/spf13/viper v1.17.0
 )
 
-require github.com/mattetti/go.xtream-codes v0.0.0-20231111232614-0c477bbd5f97
+require github.com/mattetti/go.xtream-codes v0.0.0-20231112013353-62bd7f4d5ee8
 
 require (
 	github.com/bytedance/sonic v1.10.2 // indirect
