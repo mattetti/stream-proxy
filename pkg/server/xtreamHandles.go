@@ -441,6 +441,8 @@ func getHlsRedirectURL(channel string) (*url.URL, error) {
 }
 
 func (c *Config) hlsXtreamStream(ctx *gin.Context, oriURL *url.URL) {
+	client := &http.Client{}
+
 	proxy := httputil.NewSingleHostReverseProxy(oriURL)
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		if resp.StatusCode == http.StatusFound {
@@ -449,41 +451,131 @@ func (c *Config) hlsXtreamStream(ctx *gin.Context, oriURL *url.URL) {
 				return err
 			}
 
-			id := ctx.Param("id")
-			if len(id) > 0 {
-				hlsChannelsRedirectURLLock.Lock()
-				hlsChannelsRedirectURL[id] = *location
-				hlsChannelsRedirectURLLock.Unlock()
+			redirectURL := location.String()
+			if !location.IsAbs() {
+				// If the Location is relative, construct the absolute URL
+				redirectURL = oriURL.ResolveReference(location).String()
+			} else {
+				// Record redirect hosts for /play/hls/*
+				redirectHost := location.Scheme + "://" + location.Host
+
+				if redURL, err := url.Parse(redirectHost); err == nil {
+					hlsChannelsRedirectURL["/play/hls-nginx/"] = *redURL
+				} else {
+					log.Printf("Error parsing redirect host: %s", err.Error())
+				}
+
 			}
 
-			// Update the proxy with the new URL
-			newURL, err := url.Parse(location.String())
+			// log.Printf("Redirected from %s to %s", oriURL.String(), redirectURL)
+
+			// Create a new request for the redirect location
+			newReq, err := http.NewRequest("GET", redirectURL, nil)
 			if err != nil {
 				return err
 			}
-			proxy.Director = func(req *http.Request) {
-				req.URL = newURL
-				req.Host = newURL.Host
-				mergeHttpHeader(req.Header, ctx.Request.Header)
+
+			// Copy the headers from the original request
+			for headerName, values := range ctx.Request.Header {
+				for _, value := range values {
+					newReq.Header.Add(headerName, value)
+				}
 			}
+			newReq.Header.Set("User-Agent", "com.nst.iptvsmarterstvbox/100 (Linux; U; Android 14; en_US; Pixel 8; Build/UD1A.230803.041; Cronet/114.0.5735.33)")
+
+			// Preserve query parameters
+			q := location.Query()
+			for param, values := range q {
+				for _, value := range values {
+					newReq.URL.Query().Add(param, value)
+				}
+			}
+
+			// Send the new request and stream the response
+			newResp, err := client.Do(newReq)
+			if err != nil {
+				return err
+			}
+
+			resp.Body = newResp.Body
+			resp.StatusCode = newResp.StatusCode
+			resp.Header = newResp.Header
+
+			return nil
 		}
 
-		log.Printf("hlsXtreamStream proxied from %s completed with status code: %d", oriURL.String(), resp.StatusCode)
-
+		log.Printf("Proxied URL: %s completed with status code: %d", oriURL.String(), resp.StatusCode)
 		return nil
-	}
-
-	proxy.ErrorHandler = func(writer http.ResponseWriter, request *http.Request, e error) {
-		// Log the error
-		log.Printf("Error proxying request to %s: %v", oriURL.String(), e)
-		ctx.AbortWithError(http.StatusInternalServerError, e)
 	}
 
 	proxy.Director = func(req *http.Request) {
 		req.URL = oriURL
 		req.Host = oriURL.Host
+		req.Header = make(http.Header)
 		mergeHttpHeader(req.Header, ctx.Request.Header)
+		req.Header.Set("User-Agent", "com.nst.iptvsmarterstvbox/100 (Linux; U; Android 14; en_US; Pixel 8; Build/UD1A.230803.041; Cronet/114.0.5735.33)")
+
 	}
 
 	proxy.ServeHTTP(ctx.Writer, ctx.Request)
+}
+
+// xtreamHlsNginxHandler proxies the request to the URL defined in hlsChannelsRedirectURL
+func (c *Config) xtreamHlsNginxHandler(ctx *gin.Context) {
+
+	// log.Printf("Incoming request: %s", ctx.Request.URL.String())
+
+	// Extract the original request URL from the Gin context
+	originalReq := ctx.Request
+
+	// Use the URL from the original request to get the path and query
+	originalPath := originalReq.URL.Path
+	originalQuery := originalReq.URL.RawQuery
+
+	// Log the original path and query
+	// log.Printf("Original path: %s, query: %s", originalPath, originalQuery)
+
+	// Look up the redirect URL
+	hlsChannelsRedirectURLLock.RLock()
+	oriURL, ok := hlsChannelsRedirectURL["/play/hls-nginx/"]
+	hlsChannelsRedirectURLLock.RUnlock()
+
+	if !ok {
+		log.Printf("URL not found in hlsChannelsRedirectURL for path: %s", "/play/hls-nginx/")
+		ctx.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "URL not found"})
+		return
+	}
+
+	// Append query parameters to the original URL
+	if len(originalQuery) > 0 {
+		oriURL.Path = originalPath
+		oriURL.RawQuery = originalQuery
+	}
+
+	// Log the final URL to be proxied
+	// log.Printf("Proxied URL: %s", oriURL.String())
+
+	// Set up the reverse proxy
+	proxy := httputil.NewSingleHostReverseProxy(&oriURL)
+
+	// Update the request URL for the proxy
+	proxy.Director = func(req *http.Request) {
+		req.URL = &oriURL
+		req.Host = oriURL.Host
+		req.Header = make(http.Header)
+		mergeHttpHeader(req.Header, ctx.Request.Header)
+		req.Header.Set("User-Agent", "com.nst.iptvsmarterstvbox/100 (Linux; U; Android 14; en_US; Pixel 8; Build/UD1A.230803.041; Cronet/114.0.5735.33)")
+	}
+
+	// Handle proxy errors
+	proxy.ErrorHandler = func(writer http.ResponseWriter, request *http.Request, err error) {
+		log.Printf("Error proxying request to %s: %v", oriURL.String(), err)
+		ctx.AbortWithError(http.StatusInternalServerError, err)
+	}
+
+	// Serve the proxy
+	proxy.ServeHTTP(ctx.Writer, ctx.Request)
+
+	// Log the end of the request
+	// log.Printf("Proxy request completed for: %s", ctx.Request.URL.String())
 }
