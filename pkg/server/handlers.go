@@ -71,6 +71,7 @@ func (c *Config) stream(ctx *gin.Context, oriURL *url.URL) {
 	}
 
 	mergeHttpHeader(req.Header, ctx.Request.Header)
+	req.Header.Set("User-Agent", c.userAgent)
 
 	resp, err := client.Do(req)
 	if err != nil {

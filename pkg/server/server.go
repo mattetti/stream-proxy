@@ -51,10 +51,12 @@ type Config struct {
 	proxyfiedM3UPath string
 
 	endpointAntiColision string
+
+	userAgent string
 }
 
 // NewServer initialize a new server configuration
-func NewServer(config *config.ProxyConfig) (*Config, error) {
+func NewServer(config *config.ProxyConfig, userAgent string) (*Config, error) {
 	var p m3u.Playlist
 	if config.RemoteURL.String() != "" {
 		var err error
@@ -74,6 +76,7 @@ func NewServer(config *config.ProxyConfig) (*Config, error) {
 		nil,
 		defaultProxyfiedM3UPath,
 		endpointAntiColision,
+		userAgent,
 	}, nil
 }
 

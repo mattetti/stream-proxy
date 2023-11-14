@@ -22,6 +22,8 @@ import (
 	"net/url"
 )
 
+const DefaultUA = "TiviMate/4.7.0 (NVIDIA SHIELD Android TV; Android 11)"
+
 // CredentialString represents an iptv-proxy credential.
 type CredentialString string
 

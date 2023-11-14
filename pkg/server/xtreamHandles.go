@@ -75,7 +75,7 @@ func (c *Config) cacheXtreamM3u(playlist *m3u.Playlist, cacheName string) error 
 }
 
 func (c *Config) xtreamGenerateM3u(ctx *gin.Context, extension string) (*m3u.Playlist, error) {
-	client, err := xtreamapi.New(c.XtreamUser.String(), c.XtreamPassword.String(), c.XtreamBaseURL, ctx.Request.UserAgent())
+	client, err := xtreamapi.New(c.XtreamUser.String(), c.XtreamPassword.String(), c.XtreamBaseURL, c.userAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -138,6 +138,7 @@ func (c *Config) xtreamGetAuto(ctx *gin.Context) {
 		newQuery.Add(k, strings.Join(v, ","))
 	}
 	ctx.Request.URL.RawQuery = newQuery.Encode()
+	ctx.Request.Header.Set("User-Agent", c.userAgent)
 
 	c.xtreamGet(ctx)
 }
@@ -481,7 +482,7 @@ func (c *Config) hlsXtreamStream(ctx *gin.Context, oriURL *url.URL) {
 					newReq.Header.Add(headerName, value)
 				}
 			}
-			newReq.Header.Set("User-Agent", "com.nst.iptvsmarterstvbox/100 (Linux; U; Android 14; en_US; Pixel 8; Build/UD1A.230803.041; Cronet/114.0.5735.33)")
+			newReq.Header.Set("User-Agent", c.userAgent)
 
 			// Preserve query parameters
 			q := location.Query()
@@ -513,8 +514,7 @@ func (c *Config) hlsXtreamStream(ctx *gin.Context, oriURL *url.URL) {
 		req.Host = oriURL.Host
 		req.Header = make(http.Header)
 		mergeHttpHeader(req.Header, ctx.Request.Header)
-		req.Header.Set("User-Agent", "com.nst.iptvsmarterstvbox/100 (Linux; U; Android 14; en_US; Pixel 8; Build/UD1A.230803.041; Cronet/114.0.5735.33)")
-
+		req.Header.Set("User-Agent", c.userAgent)
 	}
 
 	proxy.ServeHTTP(ctx.Writer, ctx.Request)
@@ -564,7 +564,7 @@ func (c *Config) xtreamHlsNginxHandler(ctx *gin.Context) {
 		req.Host = oriURL.Host
 		req.Header = make(http.Header)
 		mergeHttpHeader(req.Header, ctx.Request.Header)
-		req.Header.Set("User-Agent", "com.nst.iptvsmarterstvbox/100 (Linux; U; Android 14; en_US; Pixel 8; Build/UD1A.230803.041; Cronet/114.0.5735.33)")
+		req.Header.Set("User-Agent", c.userAgent)
 	}
 
 	// Handle proxy errors

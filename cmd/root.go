@@ -92,7 +92,12 @@ var rootCmd = &cobra.Command{
 			conf.AdvertisedPort = conf.HostConfig.Port
 		}
 
-		server, err := server.NewServer(conf)
+		UserAgent := viper.GetString("user-agent")
+		if UserAgent == "" {
+			UserAgent = config.DefaultUA
+		}
+
+		server, err := server.NewServer(conf, UserAgent)
 		if err != nil {
 			log.Fatal(err)
 		}
