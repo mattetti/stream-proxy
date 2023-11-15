@@ -63,18 +63,31 @@ func (c *Config) m3u8ReverseProxy(ctx *gin.Context) {
 }
 
 func (c *Config) stream(ctx *gin.Context, oriURL *url.URL) {
-	log.SetOutput(gin.DefaultWriter)
-
 	requestID, exists := ctx.Value("requestID").(string)
 	if !exists {
 		requestID = "unknown"
 	}
-	log.Printf("[%s] >> reverse proxy streaming: %s", requestID, oriURL.String())
+	proxiedURL := oriURL.String()
+	if len(proxiedURL) > 70 {
+		proxiedURL = proxiedURL[:70] + "..."
+	}
+	log.Printf("[%s] (proxy streaming) %s - %s", requestID, proxiedURL, ctx.ClientIP())
 
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("[%s] >> reverse proxy panic recovered: %v\n", requestID, r)
-			// debug.PrintStack()
+			if err, ok := r.(error); ok {
+				if err == http.ErrAbortHandler {
+					// Handle the specific case of http.ErrAbortHandler
+					log.Printf("[%s] (client disconnected) %v, URL: %s", requestID, err, oriURL.String())
+					ctx.AbortWithStatus(http.StatusOK)
+				} else {
+					// Handle other error types
+					log.Printf("[%s] >> reverse proxy panic recovered: %v\n", requestID, err)
+				}
+			} else {
+				// r is not an error type
+				log.Printf("[%s] >> reverse proxy panic recovered: unknown type: %v\n", requestID, r)
+			}
 
 			// Respond with an error or take other appropriate actions
 			// ctx.AbortWithError(http.StatusInternalServerError, fmt.Errorf("internal server error"))
@@ -95,16 +108,13 @@ func (c *Config) stream(ctx *gin.Context, oriURL *url.URL) {
 				// If the Location is relative, construct the absolute URL
 				redirectURL = oriURL.ResolveReference(location).String()
 			} else {
-				// Record redirect hosts for /play/hls/*
-				// redirectHost := location.Scheme + "://" + location.Host
 
-				log.Printf("[%s] Redirected from %s to %s", requestID, oriURL.String(), redirectURL)
-				// if redURL, err := url.Parse(redirectHost); err == nil {
-				// 	hlsChannelsRedirectURL["/play/hls-nginx/"] = *redURL
-				// } else {
-				// 	log.Printf("Error parsing redirect host: %s", err.Error())
-				// }
+				logRedirectURL := redirectURL
+				if len(logRedirectURL) > 70 {
+					logRedirectURL = logRedirectURL[:70] + "..."
+				}
 
+				log.Printf("[%s] (302) from %s to %s - %s", requestID, oriURL.String(), logRedirectURL, ctx.ClientIP())
 			}
 
 			// log.Printf("Redirected from %s to %s", oriURL.String(), redirectURL)
@@ -157,46 +167,18 @@ func (c *Config) stream(ctx *gin.Context, oriURL *url.URL) {
 	}
 
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		requestID, _ := r.Context().Value("requestID").(string)
-		log.Printf("[%s] Error during proxying the request: %v, URL: %s", requestID, err, r.URL.String())
+		if strings.Contains(err.Error(), "context canceled") {
+			log.Printf("[%s] (client disconnected) %v, URL: %s", requestID, err, r.URL.String())
+			return
+		}
+		// requestID, _ := r.Context().Value("requestID").(string)
+		log.Printf("[%s] (Error proxying) %v, URL: %s", requestID, err, r.URL.String())
 
 		// You can send a custom error response to the client
 		http.Error(w, "An error occurred while processing your request.", http.StatusBadGateway)
 	}
 
 	proxy.ServeHTTP(ctx.Writer, ctx.Request)
-}
-
-func (c *Config) Oldstream(ctx *gin.Context, oriURL *url.URL) {
-
-	requestID, exists := ctx.Value("requestID").(string)
-	if !exists {
-		requestID = "unknown"
-	}
-	log.Printf("[%s] >> reverse proxy streaming: %s", requestID, oriURL.String())
-
-	req, err := http.NewRequest("GET", oriURL.String(), nil)
-	if err != nil {
-		ctx.AbortWithError(http.StatusInternalServerError, err) // nolint: errcheck
-		return
-	}
-
-	mergeHttpHeader(req.Header, ctx.Request.Header)
-	req.Header.Set("User-Agent", c.userAgent)
-
-	resp, err := httpProxyClient.Do(req)
-	if err != nil {
-		ctx.AbortWithError(http.StatusInternalServerError, err) // nolint: errcheck
-		return
-	}
-	defer resp.Body.Close()
-
-	mergeHttpHeader(ctx.Writer.Header(), resp.Header)
-	ctx.Status(resp.StatusCode)
-	ctx.Stream(func(w io.Writer) bool {
-		io.Copy(w, resp.Body) // nolint: errcheck
-		return false
-	})
 }
 
 func (c *Config) xtreamStream(ctx *gin.Context, oriURL *url.URL) {

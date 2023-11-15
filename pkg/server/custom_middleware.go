@@ -22,8 +22,8 @@ func IncomingRequestLogger() gin.HandlerFunc {
 			userAgent = userAgent[:70] + "..."
 		}
 		// Log using the same writer as Gin's default logger
-		log.SetOutput(gin.DefaultWriter)
-		log.Printf("[in]  %s %s - %s %s | %s\n",
+		// log.SetOutput(gin.DefaultWriter)
+		log.Printf("[%s] (in) %s - %s %s | %s\n",
 			requestID,
 			c.ClientIP(),
 			c.Request.Method,
@@ -33,14 +33,8 @@ func IncomingRequestLogger() gin.HandlerFunc {
 
 		c.Next()
 
-		statusCode := 199
-		if c.Request.Response != nil {
-			statusCode = c.Request.Response.StatusCode
-		}
-
-		log.Printf("[out] %s %d - %s - %s %s | %s\n",
+		log.Printf("[%s] (done) - %s - %s %s | %s\n",
 			requestID,
-			statusCode,
 			c.ClientIP(),
 			c.Request.Method,
 			c.Request.URL.Path,
