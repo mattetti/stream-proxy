@@ -24,6 +24,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"path"
 	"strings"
@@ -62,7 +63,117 @@ func (c *Config) m3u8ReverseProxy(ctx *gin.Context) {
 }
 
 func (c *Config) stream(ctx *gin.Context, oriURL *url.URL) {
-	client := &http.Client{}
+	log.SetOutput(gin.DefaultWriter)
+
+	requestID, exists := ctx.Value("requestID").(string)
+	if !exists {
+		requestID = "unknown"
+	}
+	log.Printf("[%s] >> reverse proxy streaming: %s", requestID, oriURL.String())
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[%s] >> reverse proxy panic recovered: %v\n", requestID, r)
+			// debug.PrintStack()
+
+			// Respond with an error or take other appropriate actions
+			// ctx.AbortWithError(http.StatusInternalServerError, fmt.Errorf("internal server error"))
+			ctx.AbortWithStatus(http.StatusOK)
+		}
+	}()
+
+	proxy := httputil.NewSingleHostReverseProxy(oriURL)
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		if resp.StatusCode == http.StatusFound {
+			location, err := resp.Location()
+			if err != nil {
+				return err
+			}
+
+			redirectURL := location.String()
+			if !location.IsAbs() {
+				// If the Location is relative, construct the absolute URL
+				redirectURL = oriURL.ResolveReference(location).String()
+			} else {
+				// Record redirect hosts for /play/hls/*
+				// redirectHost := location.Scheme + "://" + location.Host
+
+				log.Printf("[%s] Redirected from %s to %s", requestID, oriURL.String(), redirectURL)
+				// if redURL, err := url.Parse(redirectHost); err == nil {
+				// 	hlsChannelsRedirectURL["/play/hls-nginx/"] = *redURL
+				// } else {
+				// 	log.Printf("Error parsing redirect host: %s", err.Error())
+				// }
+
+			}
+
+			// log.Printf("Redirected from %s to %s", oriURL.String(), redirectURL)
+
+			// Create a new request for the redirect location
+			newReq, err := http.NewRequest("GET", redirectURL, nil)
+			if err != nil {
+				return err
+			}
+
+			// Copy the headers from the original request
+			for headerName, values := range ctx.Request.Header {
+				for _, value := range values {
+					newReq.Header.Add(headerName, value)
+				}
+			}
+			newReq.Header.Set("User-Agent", c.userAgent)
+
+			// Preserve query parameters
+			q := location.Query()
+			for param, values := range q {
+				for _, value := range values {
+					newReq.URL.Query().Add(param, value)
+				}
+			}
+
+			// Send the new request and stream the response
+			newResp, err := httpProxyClient.Do(newReq)
+			if err != nil {
+				return err
+			}
+
+			resp.Body = newResp.Body
+			resp.StatusCode = newResp.StatusCode
+			resp.Header = newResp.Header
+
+			return nil
+		}
+
+		log.Printf("Proxied URL: %s completed with status code: %d", oriURL.String(), resp.StatusCode)
+		return nil
+	}
+
+	proxy.Director = func(req *http.Request) {
+		req.URL = oriURL
+		req.Host = oriURL.Host
+		req.Header = make(http.Header)
+		mergeHttpHeader(req.Header, ctx.Request.Header)
+		req.Header.Set("User-Agent", c.userAgent)
+	}
+
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		requestID, _ := r.Context().Value("requestID").(string)
+		log.Printf("[%s] Error during proxying the request: %v, URL: %s", requestID, err, r.URL.String())
+
+		// You can send a custom error response to the client
+		http.Error(w, "An error occurred while processing your request.", http.StatusBadGateway)
+	}
+
+	proxy.ServeHTTP(ctx.Writer, ctx.Request)
+}
+
+func (c *Config) Oldstream(ctx *gin.Context, oriURL *url.URL) {
+
+	requestID, exists := ctx.Value("requestID").(string)
+	if !exists {
+		requestID = "unknown"
+	}
+	log.Printf("[%s] >> reverse proxy streaming: %s", requestID, oriURL.String())
 
 	req, err := http.NewRequest("GET", oriURL.String(), nil)
 	if err != nil {
@@ -73,7 +184,7 @@ func (c *Config) stream(ctx *gin.Context, oriURL *url.URL) {
 	mergeHttpHeader(req.Header, ctx.Request.Header)
 	req.Header.Set("User-Agent", c.userAgent)
 
-	resp, err := client.Do(req)
+	resp, err := httpProxyClient.Do(req)
 	if err != nil {
 		ctx.AbortWithError(http.StatusInternalServerError, err) // nolint: errcheck
 		return

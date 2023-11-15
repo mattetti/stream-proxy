@@ -23,11 +23,13 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/jamesnetherton/m3u"
@@ -54,6 +56,17 @@ type Config struct {
 	endpointAntiColision string
 
 	userAgent string
+}
+
+// Shared client instance
+var httpProxyClient = &http.Client{
+	// Timeout: time.Second * 30,
+	Transport: &http.Transport{
+		MaxIdleConns:        100,
+		IdleConnTimeout:     90 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+		MaxConnsPerHost:     100,
+	},
 }
 
 // NewServer initialize a new server configuration
@@ -97,9 +110,12 @@ func (c *Config) Serve() error {
 	// Set Gin to write its logs to the file
 	gin.DefaultWriter = io.MultiWriter(f, os.Stdout)
 	gin.DefaultErrorWriter = io.MultiWriter(f, os.Stderr)
+	log.SetOutput(gin.DefaultWriter)
 
 	router := gin.Default()
+	// router.Use(RequestIDMiddleware())
 	router.Use(IncomingRequestLogger())
+	// router.Use(LoggerWithRequestID())
 	router.Use(cors.Default())
 	// Comment out to log the response sent back to the client
 	// if gin.Mode() == gin.DebugMode {

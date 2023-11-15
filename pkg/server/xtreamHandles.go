@@ -79,6 +79,7 @@ func (c *Config) xtreamGenerateM3u(ctx *gin.Context, extension string) (*m3u.Pla
 	if err != nil {
 		return nil, err
 	}
+	client.HTTP = httpProxyClient
 
 	cat, err := client.GetLiveCategories()
 	if err != nil {
@@ -260,6 +261,7 @@ func (c *Config) xtreamPlayerAPI(ctx *gin.Context, q url.Values) {
 		ctx.AbortWithError(http.StatusInternalServerError, err) // nolint: errcheck
 		return
 	}
+	client.HTTP = httpProxyClient
 
 	resp, httpcode, err := client.Action(c.ProxyConfig, action, q)
 	if err != nil {
@@ -283,6 +285,7 @@ func (c *Config) xtreamXMLTV(ctx *gin.Context) {
 		ctx.AbortWithError(http.StatusInternalServerError, err) // nolint: errcheck
 		return
 	}
+	client.HTTP = httpProxyClient
 
 	resp, err := client.GetXMLTV()
 	if err != nil {
@@ -442,8 +445,6 @@ func getHlsRedirectURL(channel string) (*url.URL, error) {
 }
 
 func (c *Config) hlsXtreamStream(ctx *gin.Context, oriURL *url.URL) {
-	client := &http.Client{}
-
 	proxy := httputil.NewSingleHostReverseProxy(oriURL)
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		if resp.StatusCode == http.StatusFound {
@@ -493,7 +494,7 @@ func (c *Config) hlsXtreamStream(ctx *gin.Context, oriURL *url.URL) {
 			}
 
 			// Send the new request and stream the response
-			newResp, err := client.Do(newReq)
+			newResp, err := httpProxyClient.Do(newReq)
 			if err != nil {
 				return err
 			}
