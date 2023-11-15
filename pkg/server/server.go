@@ -21,6 +21,7 @@ package server
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"net/url"
 	"os"
@@ -86,7 +87,19 @@ func (c *Config) Serve() error {
 		return err
 	}
 
+	// Create or open the log file
+	f, err := os.OpenFile("iptv-proxy.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		log.Fatalf("Error opening log file: %v", err)
+	}
+	defer f.Close()
+
+	// Set Gin to write its logs to the file
+	gin.DefaultWriter = io.MultiWriter(f, os.Stdout)
+	gin.DefaultErrorWriter = io.MultiWriter(f, os.Stderr)
+
 	router := gin.Default()
+	router.Use(IncomingRequestLogger())
 	router.Use(cors.Default())
 	// Comment out to log the response sent back to the client
 	// if gin.Mode() == gin.DebugMode {
