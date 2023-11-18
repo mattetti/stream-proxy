@@ -27,6 +27,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"path"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -67,6 +68,81 @@ func (c *Config) stream(ctx *gin.Context, oriURL *url.URL) {
 	if !exists {
 		requestID = "unknown"
 	}
+	log.Printf("[%s] (proxy streaming) %s - %s", requestID, oriURL.String(), ctx.ClientIP())
+
+	// Create a new request for the original URL
+	req, _ := http.NewRequestWithContext(ctx, "GET", oriURL.String(), nil)
+	copyHeaders(req.Header, ctx.Request.Header)
+	req.Header.Set("User-Agent", c.userAgent)
+
+	// Make the request
+	resp, err := httpProxyClient.Do(req)
+	if err != nil {
+		log.Printf("[%s] Failed to fetch from %s: %v", requestID, oriURL.String(), err)
+		ctx.AbortWithError(http.StatusBadGateway, err)
+		return
+	}
+	defer resp.Body.Close()
+
+	// Check for redirects (302 status code)
+	if resp.StatusCode == http.StatusFound {
+		location, err := resp.Location()
+		if err != nil {
+			log.Printf("[%s] Error fetching redirect location: %v", requestID, err)
+			ctx.AbortWithError(http.StatusInternalServerError, err)
+			return
+		}
+		log.Printf("[%s] Redirected from %s to %s", requestID, oriURL.String(), location.String())
+
+		redirectURL := location.String()
+		if !location.IsAbs() {
+			// If the Location is relative, construct the absolute URL
+			redirectURL = oriURL.ResolveReference(location).String()
+		} else {
+
+			logRedirectURL := redirectURL
+			if len(logRedirectURL) > 70 {
+				logRedirectURL = logRedirectURL[:70] + "..."
+			}
+
+			log.Printf("[%s] (302) from %s to %s - %s", requestID, oriURL.String(), logRedirectURL, ctx.ClientIP())
+		}
+
+		// Create a new request for the redirected URL
+		req, _ = http.NewRequestWithContext(ctx, "GET", redirectURL, nil)
+		copyHeaders(req.Header, ctx.Request.Header)
+		req.Header.Set("User-Agent", c.userAgent)
+	}
+
+	// Stream the response using reconnectingReader
+	ctx.Writer.WriteHeader(resp.StatusCode)
+	copyHeaders(ctx.Writer.Header(), resp.Header)
+
+	customReader := &reconnectingReader{
+		req:           req,
+		client:        httpProxyClient,
+		reqID:         requestID,
+		maxReconnects: 3,
+	}
+	defer customReader.Close()
+
+	_, streamErr := io.Copy(ctx.Writer, customReader)
+	if streamErr != nil {
+		log.Printf("[%s] Error during streaming: %v", requestID, streamErr)
+	}
+}
+
+func copyHeaders(dst, src http.Header) {
+	for k, v := range src {
+		dst[k] = v
+	}
+}
+
+func (c *Config) brokenstream(ctx *gin.Context, oriURL *url.URL) {
+	requestID, exists := ctx.Value("requestID").(string)
+	if !exists {
+		requestID = "unknown"
+	}
 	proxiedURL := oriURL.String()
 	if len(proxiedURL) > 70 {
 		proxiedURL = proxiedURL[:70] + "..."
@@ -83,6 +159,9 @@ func (c *Config) stream(ctx *gin.Context, oriURL *url.URL) {
 				} else {
 					// Handle other error types
 					log.Printf("[%s] >> reverse proxy panic recovered: %v\n", requestID, err)
+					//print the stack
+					stackTrace := string(debug.Stack())
+					log.Printf("[%s] >> %s\n", requestID, stackTrace)
 				}
 			} else {
 				// r is not an error type
@@ -141,17 +220,43 @@ func (c *Config) stream(ctx *gin.Context, oriURL *url.URL) {
 				}
 			}
 
-			// Send the new request and stream the response
-			newResp, err := httpProxyClient.Do(newReq)
-			if err != nil {
-				return err
+			// Use reconnectingReader to handle potential disconnections
+			resp.Body = &reconnectingReader{
+				reqID: requestID,
+				// oriURL:  oriURL,
+				req:     newReq,
+				current: nil,
 			}
 
-			resp.Body = newResp.Body
-			resp.StatusCode = newResp.StatusCode
-			resp.Header = newResp.Header
+			// Setup buffer and TeeReader
+			// var buffer bytes.Buffer
+			// teeReader := io.TeeReader(resp.Body, &buffer)
 
+			// Custom read loop with reconnection logic
+			// buffer, err := customReadLoop(resp, oriURL, newReq)
+			// if err != nil {
+			// 	log.Printf("Error streaming response: %v", err)
+			// 	ctx.AbortWithError(http.StatusInternalServerError, err)
+			// 	return err
+			// }
+
+			// Replace original response body with buffered content
+			// resp.Body = ioutil.NopCloser(buffer)
+			// resp.StatusCode = http.StatusOK
+			log.Printf("[%s] (200-302) from %s to %s completed with status code: %d", requestID, oriURL.String(), redirectURL, resp.StatusCode)
 			return nil
+
+			// // Send the new request and stream the response
+			// newResp, err := httpProxyClient.Do(newReq)
+			// if err != nil {
+			// 	return err
+			// }
+
+			// resp.Body = newResp.Body
+			// resp.StatusCode = newResp.StatusCode
+			// resp.Header = newResp.Header
+
+			// return nil
 		}
 
 		log.Printf("Proxied URL: %s completed with status code: %d", oriURL.String(), resp.StatusCode)
@@ -253,4 +358,61 @@ func (c *Config) appAuthenticate(ctx *gin.Context) {
 	}
 
 	ctx.Request.Body = io.NopCloser(io.Reader(bytes.NewReader(contents)))
+}
+
+func customReadLoop(resp *http.Response, oriURL *url.URL, newReq *http.Request) (*bytes.Buffer, error) {
+	const maxRetries = 3
+	const retryDelay = 100 * time.Millisecond
+
+	buffer := bytes.NewBuffer(nil)
+	totalRead := int64(0)
+
+	// Function to establish or re-establish a connection
+	establishConnection := func() (io.ReadCloser, error) {
+		newResp, err := httpProxyClient.Do(newReq)
+		if err != nil {
+			return nil, err
+		}
+		return newResp.Body, nil
+	}
+
+	body, err := establishConnection()
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+
+	buf := make([]byte, 4096)
+	for {
+		n, err := body.Read(buf)
+		totalRead += int64(n)
+		if n > 0 {
+			buffer.Write(buf[:n])
+		}
+
+		if err != nil {
+			if err == io.EOF {
+				log.Printf("EOF reached after %d bytes", totalRead)
+				break // End of stream
+			}
+
+			// Attempt to reconnect
+			var successfulReconnect bool
+			for retries := 0; retries < maxRetries; retries++ {
+				time.Sleep(retryDelay)
+				body, err = establishConnection()
+				if err == nil {
+					log.Printf("Reconnected after %d bytes", totalRead)
+					successfulReconnect = true
+					break
+				}
+			}
+
+			if !successfulReconnect {
+				return buffer, fmt.Errorf("failed to reconnect after %d attempts: %w", maxRetries, err)
+			}
+		}
+	}
+
+	return buffer, nil
 }

@@ -19,6 +19,7 @@
 package server
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"log"
@@ -26,6 +27,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -34,6 +36,7 @@ import (
 	"io"
 
 	"github.com/gin-gonic/gin"
+	"github.com/grafov/m3u8"
 	"github.com/jamesnetherton/m3u"
 	xtreamapi "github.com/pierre-emmanuelJ/iptv-proxy/pkg/xtream-proxy"
 	uuid "github.com/satori/go.uuid"
@@ -445,6 +448,15 @@ func getHlsRedirectURL(channel string) (*url.URL, error) {
 }
 
 func (c *Config) hlsXtreamStream(ctx *gin.Context, oriURL *url.URL) {
+	requestID, exists := ctx.Value("requestID").(string)
+	if !exists {
+		requestID = "unknown"
+	}
+
+	// debugging:
+	// Create a buffer to store the response body
+	var bodyBuf bytes.Buffer
+
 	proxy := httputil.NewSingleHostReverseProxy(oriURL)
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		if resp.StatusCode == http.StatusFound {
@@ -462,9 +474,14 @@ func (c *Config) hlsXtreamStream(ctx *gin.Context, oriURL *url.URL) {
 				redirectHost := location.Scheme + "://" + location.Host
 
 				if redURL, err := url.Parse(redirectHost); err == nil {
-					hlsChannelsRedirectURL["/play/hls-nginx/"] = *redURL
+					hlsPathKey := extractPath(location.String())
+					log.Printf("[%s] Redirection key %s >> %s", requestID, hlsPathKey, redURL.String())
+					// FIXME: we never clear the map memory
+					hlsChannelsRedirectURLLock.RLock()
+					hlsChannelsRedirectURL[hlsPathKey] = *redURL
+					hlsChannelsRedirectURLLock.RUnlock()
 				} else {
-					log.Printf("Error parsing redirect host: %s", err.Error())
+					log.Printf("[%s] Error parsing redirect host: %s", requestID, err.Error())
 				}
 
 			}
@@ -499,14 +516,25 @@ func (c *Config) hlsXtreamStream(ctx *gin.Context, oriURL *url.URL) {
 				return err
 			}
 
-			resp.Body = newResp.Body
+			log.Printf("[%s] Manually Proxied URL: %s to %s completed with status code: %d", requestID, oriURL.String(), redirectURL, newResp.StatusCode)
+
+			// debugging
+			// Wrap the new response body with a TeeReader
+			bodyBuf.Reset()
+			teeReader := io.TeeReader(newResp.Body, &bodyBuf)
+			// Set the TeeReader as the response body to be returned to the client
+			resp.Body = io.NopCloser(teeReader)
+			// resp.Body = newResp.Body
 			resp.StatusCode = newResp.StatusCode
 			resp.Header = newResp.Header
+
+			// The body will be read and streamed back to the client when proxy.ServeHTTP is called
+			// So you need to log the body after proxy.ServeHTTP, not here
 
 			return nil
 		}
 
-		log.Printf("Proxied URL: %s completed with status code: %d", oriURL.String(), resp.StatusCode)
+		log.Printf("[%s] Proxied URL: %s completed with status code: %d", requestID, oriURL.String(), resp.StatusCode)
 		return nil
 	}
 
@@ -519,11 +547,19 @@ func (c *Config) hlsXtreamStream(ctx *gin.Context, oriURL *url.URL) {
 	}
 
 	proxy.ServeHTTP(ctx.Writer, ctx.Request)
+	if bodyBuf.Len() > 0 {
+		// Log the body
+		// log.Printf("[%s] Response body: %s", requestID, bodyBuf.String())
+		// parseHLSM3u8Body(&bodyBuf, requestID)
+	}
 }
 
 // xtreamHlsNginxHandler proxies the request to the URL defined in hlsChannelsRedirectURL
 func (c *Config) xtreamHlsNginxHandler(ctx *gin.Context) {
-
+	requestID, exists := ctx.Value("requestID").(string)
+	if !exists {
+		requestID = "unknown"
+	}
 	// log.Printf("Incoming request: %s", ctx.Request.URL.String())
 
 	// Extract the original request URL from the Gin context
@@ -537,12 +573,13 @@ func (c *Config) xtreamHlsNginxHandler(ctx *gin.Context) {
 	// log.Printf("Original path: %s, query: %s", originalPath, originalQuery)
 
 	// Look up the redirect URL
+	hlsPathKey := extractPath(originalPath)
 	hlsChannelsRedirectURLLock.RLock()
-	oriURL, ok := hlsChannelsRedirectURL["/play/hls-nginx/"]
+	oriURL, ok := hlsChannelsRedirectURL[hlsPathKey]
 	hlsChannelsRedirectURLLock.RUnlock()
 
 	if !ok {
-		log.Printf("URL not found in hlsChannelsRedirectURL for path: %s", "/play/hls-nginx/")
+		log.Printf("[%s] URL not found in hlsChannelsRedirectURL for path: %s", requestID, hlsPathKey)
 		ctx.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "URL not found"})
 		return
 	}
@@ -570,8 +607,18 @@ func (c *Config) xtreamHlsNginxHandler(ctx *gin.Context) {
 
 	// Handle proxy errors
 	proxy.ErrorHandler = func(writer http.ResponseWriter, request *http.Request, err error) {
-		log.Printf("Error proxying request to %s: %v", oriURL.String(), err)
+		log.Printf("[%s] Error proxying request to %s: %v", requestID, oriURL.String(), err)
 		ctx.AbortWithError(http.StatusInternalServerError, err)
+	}
+
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		if resp.StatusCode == http.StatusForbidden {
+			// TODO: consider a retry using the original URL before the redirect
+			log.Printf("[%s] Forbidden URL: %s - %s", requestID, oriURL.String(), ctx.ClientIP())
+			ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Forbidden URL"})
+			return nil
+		}
+		return nil
 	}
 
 	// Serve the proxy
@@ -579,4 +626,62 @@ func (c *Config) xtreamHlsNginxHandler(ctx *gin.Context) {
 
 	// Log the end of the request
 	// log.Printf("Proxy request completed for: %s", ctx.Request.URL.String())
+}
+
+func extractPath(rawURL string) string {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		log.Printf("Error parsing URL: %s", err.Error())
+		return "/play/hls-nginx/" // Fallback key
+	}
+
+	// Check if the path ends with .m3u8
+	if strings.HasSuffix(parsedURL.Path, ".m3u8") {
+		_, file := path.Split(parsedURL.Path)
+		return strings.TrimSuffix(file, ".m3u8") // Return filename without .m3u8
+	}
+
+	// If the path ends with .ts
+	if strings.HasSuffix(parsedURL.Path, ".ts") {
+		// Extract the segment after /play/hls-nginx/
+		trimmedPath := strings.TrimPrefix(parsedURL.Path, "/play/hls-nginx/")
+		segments := strings.Split(trimmedPath, "/")
+		if len(segments) > 0 {
+			return segments[0] // Return the first segment
+		}
+	}
+
+	return parsedURL.Path
+}
+
+func parseHLSM3u8Body(bodyBuf *bytes.Buffer, requestID string) {
+	// Create a reader from the buffer
+	bufReader := bytes.NewReader(bodyBuf.Bytes())
+
+	// Use the m3u8 library to parse the playlist
+	playlist, listType, err := m3u8.DecodeFrom(bufReader, true)
+	if err != nil {
+		log.Printf("[%s] Error parsing m3u8: %s", requestID, err)
+		return
+	}
+
+	switch listType {
+	case m3u8.MEDIA:
+		mediaPlaylist := playlist.(*m3u8.MediaPlaylist)
+		// Iterate over segments and extract URLs
+		for _, segment := range mediaPlaylist.Segments {
+			if segment != nil {
+				log.Printf("[%s] Segment URL: %s", requestID, segment.URI)
+			}
+		}
+
+	case m3u8.MASTER:
+		masterPlaylist := playlist.(*m3u8.MasterPlaylist)
+		// Iterate over variants and extract URLs
+		for _, variant := range masterPlaylist.Variants {
+			if variant != nil {
+				log.Printf("[%s] Variant URL: %s", requestID, variant.URI)
+			}
+		}
+	}
 }
