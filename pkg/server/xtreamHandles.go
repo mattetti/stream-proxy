@@ -321,6 +321,23 @@ func (c *Config) xtreamStreamLive(ctx *gin.Context) {
 	c.xtreamStream(ctx, rpURL)
 }
 
+func (c *Config) xtreamGuestStreamLive(ctx *gin.Context) {
+	if !c.SharedStream.IsBeingUpdated() {
+		// TODO: let the guest connect to whatever stream they want until the host
+		// connects to a stream. Then, the guest should be redirected to the shared buffer.
+		ctx.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+	c.SharedStream.AddClient()
+	defer c.SharedStream.RemoveClient()
+
+	_, streamErr := io.Copy(ctx.Writer, c.SharedStream)
+	if streamErr != nil {
+		ctx.AbortWithError(http.StatusInternalServerError, streamErr) // nolint: errcheck
+		return
+	}
+}
+
 func (c *Config) xtreamStreamPlay(ctx *gin.Context) {
 	token := ctx.Param("token")
 	t := ctx.Param("type")

@@ -126,7 +126,9 @@ func (c *Config) stream(ctx *gin.Context, oriURL *url.URL) {
 	}
 	defer customReader.Close()
 
-	_, streamErr := io.Copy(ctx.Writer, customReader)
+	multiWriter := io.MultiWriter(ctx.Writer, c.SharedStream)
+	_, streamErr := io.Copy(multiWriter, customReader)
+
 	if streamErr != nil {
 		log.Printf("[%s] Error during streaming: %v", requestID, streamErr)
 	}

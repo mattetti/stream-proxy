@@ -58,4 +58,5 @@ type ProxyConfig struct {
 	AdvertisedPort       int
 	HTTPS                bool
 	User, Password       CredentialString
+	GuestUser, GuestPassword CredentialString
 }

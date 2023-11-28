@@ -55,6 +55,8 @@ type Config struct {
 	endpointAntiColision string
 
 	userAgent string
+
+	SharedStream *BufferedStream
 }
 
 // Shared client instance
@@ -90,6 +92,7 @@ func NewServer(config *config.ProxyConfig, userAgent string) (*Config, error) {
 		defaultProxyfiedM3UPath,
 		endpointAntiColision,
 		userAgent,
+		NewBufferedStream(),
 	}, nil
 }
 

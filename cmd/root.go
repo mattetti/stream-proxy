@@ -80,6 +80,8 @@ var rootCmd = &cobra.Command{
 			M3UCacheExpiration:   viper.GetInt("m3u-cache-expiration"),
 			User:                 config.CredentialString(viper.GetString("user")),
 			Password:             config.CredentialString(viper.GetString("password")),
+			GuestUser:            config.CredentialString(viper.GetString("guest-user")),
+			GuestPassword:        config.CredentialString(viper.GetString("guest-password")),
 			AdvertisedPort:       viper.GetInt("advertised-port"),
 			HTTPS:                viper.GetBool("https"),
 			M3UFileName:          viper.GetString("m3u-file-name"),
@@ -134,6 +136,8 @@ func init() {
 	rootCmd.Flags().BoolP("https", "", false, "Activate https for urls proxy")
 	rootCmd.Flags().String("user", "usertest", "User auth to access proxy (m3u/xtream)")
 	rootCmd.Flags().String("password", "passwordtest", "Password auth to access proxy (m3u/xtream)")
+	rootCmd.Flags().String("guest-user", "guest", "Guest user auth to access proxy xtream")
+	rootCmd.Flags().String("guest-password", "guest", "guest password auth to access proxy xtream")
 	rootCmd.Flags().String("xtream-user", "", "Xtream-code user login")
 	rootCmd.Flags().String("xtream-password", "", "Xtream-code password login")
 	rootCmd.Flags().String("xtream-base-url", "", "Xtream-code base url e.g(http://expample.tv:8080)")

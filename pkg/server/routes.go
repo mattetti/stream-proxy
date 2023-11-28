@@ -60,6 +60,7 @@ func (c *Config) xtreamRoutes(r *gin.RouterGroup) {
 	r.GET("/xmltv.php", c.authenticate, c.xtreamXMLTV)
 	r.GET(fmt.Sprintf("/%s/%s/:id", c.User, c.Password), c.xtreamStreamHandler)
 	r.GET(fmt.Sprintf("/live/%s/%s/:id", c.User, c.Password), c.xtreamStreamLive)
+	r.GET(fmt.Sprintf("/live/%s/%s/:id", c.GuestUser, c.GuestPassword), c.xtreamGuestStreamLive)
 	r.GET(fmt.Sprintf("/timeshift/%s/%s/:duration/:start/:id", c.User, c.Password), c.xtreamStreamTimeshift)
 	r.GET(fmt.Sprintf("/movie/%s/%s/:id", c.User, c.Password), c.xtreamStreamMovie)
 	r.GET(fmt.Sprintf("/series/%s/%s/:id", c.User, c.Password), c.xtreamStreamSeries)
