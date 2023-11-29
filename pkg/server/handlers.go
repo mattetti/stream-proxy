@@ -333,6 +333,11 @@ func (c *Config) authenticate(ctx *gin.Context) {
 		ctx.AbortWithError(http.StatusBadRequest, err) // nolint: errcheck
 		return
 	}
+	if c.ProxyConfig.GuestUser.String() == authReq.Username && c.ProxyConfig.GuestPassword.String() == authReq.Password {
+		// custom flag to indicate guest user
+		ctx.Set("isGuest", true)
+		return
+	}
 	if c.ProxyConfig.User.String() != authReq.Username || c.ProxyConfig.Password.String() != authReq.Password {
 		ctx.AbortWithStatus(http.StatusUnauthorized)
 	}

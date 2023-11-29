@@ -20,9 +20,12 @@ package server
 
 import (
 	"bytes"
+	"embed"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -46,6 +49,9 @@ type cacheMeta struct {
 	string
 	time.Time
 }
+
+//go:embed waiting_video.ts
+var waitingVideo embed.FS
 
 var hlsChannelsRedirectURL map[string]url.URL = map[string]url.URL{}
 var hlsChannelsRedirectURLLock = sync.RWMutex{}
@@ -266,7 +272,8 @@ func (c *Config) xtreamPlayerAPI(ctx *gin.Context, q url.Values) {
 	}
 	client.HTTP = httpProxyClient
 
-	resp, httpcode, err := client.Action(c.ProxyConfig, action, q)
+	isGuest, _ := ctx.Value("isGuest").(bool)
+	resp, httpcode, err := client.Action(c.ProxyConfig, action, q, isGuest)
 	if err != nil {
 		ctx.AbortWithError(httpcode, err) // nolint: errcheck
 		return
@@ -322,12 +329,58 @@ func (c *Config) xtreamStreamLive(ctx *gin.Context) {
 }
 
 func (c *Config) xtreamGuestStreamLive(ctx *gin.Context) {
+	requestID, exists := ctx.Value("requestID").(string)
+	if !exists {
+		requestID = "unknown"
+	}
+
 	if !c.SharedStream.IsBeingUpdated() {
 		// TODO: let the guest connect to whatever stream they want until the host
 		// connects to a stream. Then, the guest should be redirected to the shared buffer.
-		ctx.AbortWithStatus(http.StatusNotFound)
-		return
+		videoData, err := fs.ReadFile(waitingVideo, "waiting_video.ts")
+		if err != nil {
+			log.Printf("[%s] Failed to read embedded video: %v", requestID, err)
+			ctx.AbortWithError(http.StatusInternalServerError, err)
+			return
+		}
+
+		ctx.Writer.Header().Set("Content-Type", "video/MP2T")
+		// Create a new reader for the video data
+		videoReader := bytes.NewReader(videoData)
+
+		for {
+			// Stream the video content to the client using io.Copy
+			n, err := io.Copy(ctx.Writer, videoReader)
+			// log.Printf("[%s] Copied %d bytes to client", requestID, n)
+			if n == 0 {
+				log.Printf("[%s] No bytes copied to client, rewinding the waiting video", requestID)
+				videoReader.Seek(0, io.SeekStart)
+				continue
+			}
+			if err != nil {
+				if err == io.EOF {
+					log.Printf("[%s] Waiting video stream reached the end, rewinding", requestID)
+					videoReader.Seek(0, io.SeekStart)
+					continue
+				}
+				// Check for client disconnection
+				if errors.Is(err, net.ErrClosed) {
+					log.Printf("[%s] Connection closed by client: %v", requestID, err)
+					return
+				}
+
+				log.Printf("[%s] Error during streaming: %v", requestID, err)
+				ctx.AbortWithStatus(http.StatusInternalServerError)
+				return
+			}
+
+			// Flush the response if it supports flushing
+			// if flusher, ok := ctx.Writer.(http.Flusher); ok {
+			// 	flusher.Flush()
+			// }
+		}
 	}
+
 	c.SharedStream.AddClient()
 	defer c.SharedStream.RemoveClient()
 
