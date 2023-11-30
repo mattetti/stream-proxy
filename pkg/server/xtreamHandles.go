@@ -381,14 +381,19 @@ func (c *Config) xtreamGuestStreamLive(ctx *gin.Context) {
 		}
 	}
 
+	log.Printf("[%s] Shared stream is being updated, redirecting to shared stream", requestID)
 	c.SharedStream.AddClient()
 	defer c.SharedStream.RemoveClient()
 
-	_, streamErr := io.Copy(ctx.Writer, c.SharedStream)
+	bufferReader := c.SharedStream.NewReader()
+	defer c.SharedStream.RemoveReader(bufferReader)
+
+	n, streamErr := io.Copy(ctx.Writer, bufferReader)
 	if streamErr != nil {
 		ctx.AbortWithError(http.StatusInternalServerError, streamErr) // nolint: errcheck
 		return
 	}
+	log.Printf("[%s] Copied %d bytes to guest", requestID, n)
 }
 
 func (c *Config) xtreamStreamPlay(ctx *gin.Context) {

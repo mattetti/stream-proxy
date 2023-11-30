@@ -132,6 +132,8 @@ func (c *Config) stream(ctx *gin.Context, oriURL *url.URL) {
 	if streamErr != nil {
 		log.Printf("[%s] Error during streaming: %v", requestID, streamErr)
 	}
+
+	c.SharedStream.Reset()
 }
 
 func copyHeaders(dst, src http.Header) {
